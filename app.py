@@ -75,47 +75,8 @@ def format_time(seconds):
     if hrs > 0: return f"{hrs}:{mins:02d}:{secs:05.2f}"
     else: return f"{mins}:{secs:05.2f}"
 
-
 # ==========================================
-# PART 2: THE BULK PARSING ENGINE
-# ==========================================
-def parse_raw_athletic_paste(raw_text):
-    """Scans messy copy-paste data and extracts clean rows."""
-    entries = []
-    lines = raw_text.split('\n')
-    
-    current_name, current_time = "", ""
-    current_notes = []
-    
-    for line in lines:
-        line = line.strip()
-        if not line: continue
-        
-        # Look for any valid race times in the line
-        times = re.findall(r'\d+:\d{2}\.\d{2}', line)
-        
-        # Look for rank + name pattern (e.g., "1Katy Zang")
-        name_match = re.match(r'^(\d+)([A-Za-z\s\-\'\,]+)$', line)
-        
-        if name_match and not times:
-            if current_name and current_time:
-                entries.append({"Name": current_name, "Time": current_time, "Notes": " ".join(current_notes)})
-            current_name = name_match.group(2).strip()
-            current_time = ""
-            current_notes = []
-        elif times:
-            current_time = times[-1] # Grabs the last time to ignore duplicates
-        else:
-            if current_name:
-                current_notes.append(line)
-                
-    if current_name and current_time:
-        entries.append({"Name": current_name, "Time": current_time, "Notes": " ".join(current_notes)})
-        
-    return pd.DataFrame(entries)
-
-# ==========================================
-# PART 3: THE STREAMLIT WEB INTERFACE
+# PART 2: THE STREAMLIT WEB INTERFACE
 # ==========================================
 
 st.set_page_config(page_title="Purdy Points Calculator", layout="wide")
@@ -216,84 +177,97 @@ with tab3:
     st.subheader(f"🚀 Relay Composite Time: {format_time(total_conv_sec)}")
 
 # ------------------------------------------
-# TAB 4: THE BULK SEEDING PIPELINE
+# TAB 4: THE BULK SEEDING PIPELINE (CSV UPLOAD)
 # ------------------------------------------
 with tab4:
-    st.subheader("Bulk Seeding Pipeline (Standardizer)")
+    st.subheader("Bulk Seeding Pipeline (CSV Standardizer)")
     st.markdown("""
     **Instructions:**
     1. Select the target championship event you are seeding.
-    2. Paste your messy entry text directly from Athletic.net.
-    3. Click **Parse Text** to untangle names, times, and notes.
-    4. Click **Generate Conversions** to calculate the alternate scenarios!
+    2. Upload the official CSV export from Athletic.net.
+    3. Click **Generate Conversions** to calculate the alternate scenarios!
     """)
     
     target_event = st.radio("Target Seeding Event:", ["1 Mile", "2 Mile"], index=0, horizontal=True)
     
-    raw_text = st.text_area("Paste Athletic.net Entries Here:", height=150)
+    # NEW File Uploader!
+    uploaded_file = st.file_uploader("Upload Athletic.net Entries CSV", type=["csv"])
     
-    if "bulk_df" not in st.session_state:
-        st.session_state.bulk_df = pd.DataFrame([{"Name": "", "Time": "", "Notes": ""} for _ in range(3)])
-
-    if st.button("1. Parse Text", type="primary"):
-        if raw_text:
-            parsed_df = parse_raw_athletic_paste(raw_text)
-            if not parsed_df.empty:
-                st.session_state.bulk_df = parsed_df
-                st.success(f"Successfully untangled {len(parsed_df)} athletes!")
-            else:
-                st.warning("Could not detect any athletes. Make sure to copy the whole list starting with their rank numbers.")
-    
-    edited_df = st.data_editor(st.session_state.bulk_df, num_rows="dynamic", use_container_width=True)
-    
-    if st.button("2. Generate Conversions", type="primary"):
-        results = []
-        for index, row in edited_df.iterrows():
-            raw_time = str(row.get('Time', ''))
-            times = re.findall(r'\d+:\d{2}\.\d{2}', raw_time)
-            if not times: continue
-            
-            final_time = times[-1]
-            parts = final_time.split(':')
-            total_sec = (int(parts[0]) * 60) + float(parts[1])
-            
-            if target_event == "1 Mile":
-                pts_1500 = purdy_classic(1500.0, total_sec)
-                conv_1500_to_mile = get_equivalent_time(1609.344, pts_1500)
-                
-                pts_1600 = purdy_classic(1600.0, total_sec)
-                conv_1600_to_mile = get_equivalent_time(1609.344, pts_1600)
-                
-                results.append({
-                    "Name": row.get("Name", ""),
-                    "Input Time": final_time,
-                    "Original Notes": row.get("Notes", ""),
-                    "1 Mile (if 1500m)": format_time(conv_1500_to_mile),
-                    "1 Mile (if 1600m)": format_time(conv_1600_to_mile)
-                })
-                
-            elif target_event == "2 Mile":
-                pts_3000 = purdy_classic(3000.0, total_sec)
-                conv_3000_to_2mile = get_equivalent_time(3218.688, pts_3000)
-                
-                pts_3200 = purdy_classic(3200.0, total_sec)
-                conv_3200_to_2mile = get_equivalent_time(3218.688, pts_3200)
-                
-                results.append({
-                    "Name": row.get("Name", ""),
-                    "Input Time": final_time,
-                    "Original Notes": row.get("Notes", ""),
-                    "2 Mile (if 3000m)": format_time(conv_3000_to_2mile),
-                    "2 Mile (if 3200m)": format_time(conv_3200_to_2mile)
-                })
+    if uploaded_file is not None:
+        # Instantly reads your CSV into a neat table
+        df = pd.read_csv(uploaded_file)
         
-        if results:
-            res_df = pd.DataFrame(results)
-            st.success("Conversions complete!")
-            st.dataframe(res_df, use_container_width=True)
+        # Show a preview of the uploaded data so you know it worked
+        st.write("Preview of uploaded data:")
+        st.dataframe(df.head(3), use_container_width=True)
+        
+        if st.button("Generate Conversions", type="primary"):
+            results = []
+            for index, row in df.iterrows():
+                
+                # Safely grab the Final Seed time
+                raw_time = str(row.get('Final Seed', ''))
+                
+                # Find the valid time formatting (e.g. 4:35.02)
+                times = re.findall(r'\d+:\d{2}(?:\.\d+)?', raw_time)
+                if not times: 
+                    continue
+                
+                final_time = times[-1]
+                parts = final_time.split(':')
+                total_sec = (int(parts[0]) * 60) + float(parts[1])
+                
+                # Combine User and Host comments so you don't miss anything
+                u_comment = str(row.get('User Comment', ''))
+                h_comment = str(row.get('Host Comment', ''))
+                combined_notes = f"{u_comment} {h_comment}".replace("nan", "").strip()
+                
+                athlete_name = str(row.get("Athlete Name", ""))
+                affiliation = str(row.get("Affiliation", ""))
+                
+                if target_event == "1 Mile":
+                    pts_1500 = purdy_classic(1500.0, total_sec)
+                    conv_1500_to_mile = get_equivalent_time(1609.344, pts_1500)
+                    
+                    pts_1600 = purdy_classic(1600.0, total_sec)
+                    conv_1600_to_mile = get_equivalent_time(1609.344, pts_1600)
+                    
+                    results.append({
+                        "Name": athlete_name,
+                        "Team": affiliation,
+                        "Input Time (Final Seed)": final_time,
+                        "Original Notes": combined_notes,
+                        "1 Mile (if 1500m)": format_time(conv_1500_to_mile),
+                        "1 Mile (if 1600m)": format_time(conv_1600_to_mile)
+                    })
+                    
+                elif target_event == "2 Mile":
+                    pts_3000 = purdy_classic(3000.0, total_sec)
+                    conv_3000_to_2mile = get_equivalent_time(3218.688, pts_3000)
+                    
+                    pts_3200 = purdy_classic(3200.0, total_sec)
+                    conv_3200_to_2mile = get_equivalent_time(3218.688, pts_3200)
+                    
+                    results.append({
+                        "Name": athlete_name,
+                        "Team": affiliation,
+                        "Input Time (Final Seed)": final_time,
+                        "Original Notes": combined_notes,
+                        "2 Mile (if 3000m)": format_time(conv_3000_to_2mile),
+                        "2 Mile (if 3200m)": format_time(conv_3200_to_2mile)
+                    })
             
-            file_label = target_event.replace(" ", "_").lower()
-            csv = res_df.to_csv(index=False).encode('utf-8')
-            st.download_button(label="Download Results as CSV", data=csv, file_name=f"bulk_seeds_{file_label}.csv", mime="text/csv")
-        else:
-            st.error("No valid times found to convert. Check your data format.")
+            if results:
+                res_df = pd.DataFrame(results)
+                st.success("Conversions complete!")
+                
+                # Display the beautifully structured cheat sheet
+                st.dataframe(res_df, use_container_width=True)
+                
+                file_label = target_event.replace(" ", "_").lower()
+                csv_data = res_df.to_csv(index=False).encode('utf-8')
+                
+                # Download button for the new table
+                st.download_button(label="Download Results as CSV", data=csv_data, file_name=f"bulk_seeds_{file_label}.csv", mime="text/csv")
+            else:
+                st.error("No valid times found to convert. Check your data format.")
