@@ -1,5 +1,7 @@
 import math
 import streamlit as st
+import pandas as pd
+import re
 
 # ==========================================
 # PART 1: THE PURDY MATH ENGINE
@@ -73,14 +75,53 @@ def format_time(seconds):
     if hrs > 0: return f"{hrs}:{mins:02d}:{secs:05.2f}"
     else: return f"{mins}:{secs:05.2f}"
 
+
 # ==========================================
-# PART 2: THE STREAMLIT WEB INTERFACE
+# PART 2: THE BULK PARSING ENGINE
+# ==========================================
+def parse_raw_athletic_paste(raw_text):
+    """Scans messy copy-paste data and extracts clean rows."""
+    entries = []
+    lines = raw_text.split('\n')
+    
+    current_name, current_time = "", ""
+    current_notes = []
+    
+    for line in lines:
+        line = line.strip()
+        if not line: continue
+        
+        # Look for any valid race times in the line
+        times = re.findall(r'\d+:\d{2}\.\d{2}', line)
+        
+        # Look for rank + name pattern (e.g., "1Katy Zang")
+        name_match = re.match(r'^(\d+)([A-Za-z\s\-\'\,]+)$', line)
+        
+        if name_match and not times:
+            if current_name and current_time:
+                entries.append({"Name": current_name, "Time": current_time, "Notes": " ".join(current_notes)})
+            current_name = name_match.group(2).strip()
+            current_time = ""
+            current_notes = []
+        elif times:
+            current_time = times[-1] # Grabs the last time to ignore duplicates
+        else:
+            if current_name:
+                current_notes.append(line)
+                
+    if current_name and current_time:
+        entries.append({"Name": current_name, "Time": current_time, "Notes": " ".join(current_notes)})
+        
+    return pd.DataFrame(entries)
+
+# ==========================================
+# PART 3: THE STREAMLIT WEB INTERFACE
 # ==========================================
 
-st.set_page_config(page_title="Purdy Points Calculator", layout="centered")
-st.title("🏃 Purdy Points & Relay Calculator")
+st.set_page_config(page_title="Purdy Points Calculator", layout="wide")
+st.title("🏃 Purdy Points & Race Calculator")
 
-tab1, tab2, tab3 = st.tabs(["Individual Conversions", "Relay Calculator", "Relay with Conversions"])
+tab1, tab2, tab3, tab4 = st.tabs(["Individual", "Relay (Simple)", "Relay (Conversions)", "Bulk Seeding Pipeline"])
 
 # ------------------------------------------
 # TAB 1: INDIVIDUAL CALCULATOR
@@ -88,14 +129,11 @@ tab1, tab2, tab3 = st.tabs(["Individual Conversions", "Relay Calculator", "Relay
 with tab1:
     st.subheader("Individual Performance Conversions")
     col1, col2, col3, col4 = st.columns(4)
-    
-    # Changed default value to 1500 (instead of 1500.0) so Streamlit forces whole numbers
     raw_dist = col1.number_input("Distance", min_value=0, value=1500, step=10)
     unit = col2.selectbox("Unit", ["Meters", "Miles", "Kilometers"])
     minutes = col3.number_input("Minutes", min_value=0, value=3, step=1)
     seconds = col4.number_input("Seconds", min_value=0.0, max_value=59.99, value=30.0, step=0.1)
 
-    # Convert the whole number back to a float for the math engine to process accurately
     if unit == "Miles": dist = float(raw_dist) * 1609.344
     elif unit == "Kilometers": dist = float(raw_dist) * 1000.0
     else: dist = float(raw_dist)
@@ -107,54 +145,33 @@ with tab1:
         st.metric(label="Purdy Points", value=f"{score:.2f}")
 
         st.markdown("### Equivalent Times")
-        
-        # Reordered from shortest to longest distance, and added 3200m back in
         target_distances = [
-            ("200m", 200),
-            ("300m", 300),
-            ("400m", 400),
-            ("500m", 500),
-            ("600m", 600),
-            ("800m", 800),
-            ("1000m", 1000),
-            ("1200m", 1200),
-            ("1500m", 1500),
-            ("1600m", 1600),
-            ("1 Mile", 1609.344),
-            ("3000m", 3000),
-            ("3200m", 3200),
-            ("2 Mile", 3218.688),
-            ("5k", 5000)
+            ("200m", 200), ("300m", 300), ("400m", 400), ("500m", 500),
+            ("600m", 600), ("800m", 800), ("1000m", 1000), ("1200m", 1200),
+            ("1500m", 1500), ("1600m", 1600), ("1 Mile", 1609.344), ("3000m", 3000),
+            ("3200m", 3200), ("2 Mile", 3218.688), ("5k", 5000)
         ]
         
         c1, c2 = st.columns(2)
-        
-        # Streamlit easily handles the new odd number of items (15 distances) 
-        # using the exact same loop logic!
         for i in range(0, len(target_distances), 2):
             name1, dist1 = target_distances[i]
             c1.write(f"**{name1}:** {format_time(get_equivalent_time(dist1, score))}")
             if i + 1 < len(target_distances):
                 name2, dist2 = target_distances[i+1]
                 c2.write(f"**{name2}:** {format_time(get_equivalent_time(dist2, score))}")
-    else:
-        st.warning("Please enter a time greater than 0.")
+
 # ------------------------------------------
 # TAB 2: RELAY CALCULATOR (SIMPLE SUM)
 # ------------------------------------------
 with tab2:
     st.subheader("Standard Relay Addition")
-    st.write("Sum up 4 split times quickly without conversions.")
-    
     total_simple_sec = 0.0
-    
     for i in range(4):
         col1, col2, col3 = st.columns([1, 2, 2])
         col1.write(f"**Leg {i+1}**")
         m = col2.number_input("Minutes", min_value=0, value=0, step=1, key=f"s_m_{i}")
         s = col3.number_input("Seconds", min_value=0.0, max_value=59.99, value=0.0, step=0.1, key=f"s_s_{i}")
         total_simple_sec += (m * 60) + s
-        
     st.markdown("---")
     st.subheader(f"⏱️ Total Time: {format_time(total_simple_sec)}")
 
@@ -163,66 +180,120 @@ with tab2:
 # ------------------------------------------
 relay_choices = ["200m", "300m", "400m", "500m", "600m", "800m", "1000m", "1200m", "1500m", "1600m", "1 Mile"]
 relay_dist_map = {"200m": 200, "300m": 300, "400m": 400, "500m": 500, "600m": 600, "800m": 800, "1000m": 1000, "1200m": 1200, "1500m": 1500, "1600m": 1600, "1 Mile": 1609.344}
-
-preset_map = {
-    "Custom (Manual)": None,
-    "4x200m": ["200m", "200m", "200m", "200m"],
-    "4x400m": ["400m", "400m", "400m", "400m"],
-    "4x800m": ["800m", "800m", "800m", "800m"],
-    "4x1 mile": ["1 Mile", "1 Mile", "1 Mile", "1 Mile"],
-    "SMR": ["200m", "200m", "400m", "800m"],
-    "DMR": ["1200m", "400m", "800m", "1600m"]
-}
+preset_map = {"Custom (Manual)": None, "4x200m": ["200m", "200m", "200m", "200m"], "4x400m": ["400m", "400m", "400m", "400m"], "4x800m": ["800m", "800m", "800m", "800m"], "4x1 mile": ["1 Mile", "1 Mile", "1 Mile", "1 Mile"], "SMR": ["200m", "200m", "400m", "800m"], "DMR": ["1200m", "400m", "800m", "1600m"]}
 
 def update_preset():
-    """Streamlit callback to update session state when preset changes."""
     selection = st.session_state.preset_dropdown
     distances = preset_map.get(selection)
     if distances:
-        for i in range(4):
-            # This directly overwrites Streamlit's memory for the 4 target dropdowns
-            st.session_state[f"c_out_{i}"] = distances[i]
+        for i in range(4): st.session_state[f"c_out_{i}"] = distances[i]
 
-# Initialize default values in memory so they start cleanly at 400m
 for i in range(4):
-    if f"c_in_{i}" not in st.session_state:
-        st.session_state[f"c_in_{i}"] = "400m"
-    if f"c_out_{i}" not in st.session_state:
-        st.session_state[f"c_out_{i}"] = "400m"
+    if f"c_in_{i}" not in st.session_state: st.session_state[f"c_in_{i}"] = "400m"
+    if f"c_out_{i}" not in st.session_state: st.session_state[f"c_out_{i}"] = "400m"
 
 with tab3:
     st.subheader("Relay Calculator with Purdy Conversions")
-    
-    # We add an 'on_change' trigger so the app updates the dropdowns instantly
     st.selectbox("Event Preset:", list(preset_map.keys()), key="preset_dropdown", on_change=update_preset)
-    
     total_conv_sec = 0.0
-    
-    st.markdown("**Enter splits and target distances:**")
     for i in range(4):
         c1, c2, c3, c4, c5 = st.columns([1, 1.5, 2, 2, 2])
         c1.write(f"**Leg {i+1}**")
-        
         m = c2.number_input("Min", min_value=0, value=0, step=1, key=f"c_m_{i}")
         s = c3.number_input("Sec", min_value=0.0, max_value=59.99, value=0.0, step=0.1, key=f"c_s_{i}")
-        
-        # Streamlit now handles the selected values natively via their session state 'key'
         in_choice = c4.selectbox("Input Event", relay_choices, key=f"c_in_{i}")
         out_choice = c5.selectbox("Convert To", relay_choices, key=f"c_out_{i}")
-
         leg_total_sec = (m * 60) + s
         if leg_total_sec > 0:
-            in_dist = relay_dist_map[in_choice]
-            out_dist = relay_dist_map[out_choice]
-            pts = purdy_classic(in_dist, leg_total_sec)
-            conv_sec = get_equivalent_time(out_dist, pts)
-            
+            pts = purdy_classic(relay_dist_map[in_choice], leg_total_sec)
+            conv_sec = get_equivalent_time(relay_dist_map[out_choice], pts)
             rounded_sec = round(conv_sec, 2)
             total_conv_sec += rounded_sec
-            
             c5.caption(f"**Converted: {format_time(rounded_sec)}**")
         else:
             c5.caption(f"**Converted: 0.00**")
-
     st.markdown("---")
     st.subheader(f"🚀 Relay Composite Time: {format_time(total_conv_sec)}")
+
+# ------------------------------------------
+# TAB 4: THE BULK SEEDING PIPELINE
+# ------------------------------------------
+with tab4:
+    st.subheader("Bulk Seeding Pipeline (Standardizer)")
+    st.markdown("""
+    **Instructions:**
+    1. Select the target championship event you are seeding.
+    2. Paste your messy entry text directly from Athletic.net.
+    3. Click **Parse Text** to untangle names, times, and notes.
+    4. Click **Generate Conversions** to calculate the alternate scenarios!
+    """)
+    
+    target_event = st.radio("Target Seeding Event:", ["1 Mile", "2 Mile"], index=0, horizontal=True)
+    
+    raw_text = st.text_area("Paste Athletic.net Entries Here:", height=150)
+    
+    if "bulk_df" not in st.session_state:
+        st.session_state.bulk_df = pd.DataFrame([{"Name": "", "Time": "", "Notes": ""} for _ in range(3)])
+
+    if st.button("1. Parse Text", type="primary"):
+        if raw_text:
+            parsed_df = parse_raw_athletic_paste(raw_text)
+            if not parsed_df.empty:
+                st.session_state.bulk_df = parsed_df
+                st.success(f"Successfully untangled {len(parsed_df)} athletes!")
+            else:
+                st.warning("Could not detect any athletes. Make sure to copy the whole list starting with their rank numbers.")
+    
+    edited_df = st.data_editor(st.session_state.bulk_df, num_rows="dynamic", use_container_width=True)
+    
+    if st.button("2. Generate Conversions", type="primary"):
+        results = []
+        for index, row in edited_df.iterrows():
+            raw_time = str(row.get('Time', ''))
+            times = re.findall(r'\d+:\d{2}\.\d{2}', raw_time)
+            if not times: continue
+            
+            final_time = times[-1]
+            parts = final_time.split(':')
+            total_sec = (int(parts[0]) * 60) + float(parts[1])
+            
+            if target_event == "1 Mile":
+                pts_1500 = purdy_classic(1500.0, total_sec)
+                conv_1500_to_mile = get_equivalent_time(1609.344, pts_1500)
+                
+                pts_1600 = purdy_classic(1600.0, total_sec)
+                conv_1600_to_mile = get_equivalent_time(1609.344, pts_1600)
+                
+                results.append({
+                    "Name": row.get("Name", ""),
+                    "Input Time": final_time,
+                    "Original Notes": row.get("Notes", ""),
+                    "1 Mile (if 1500m)": format_time(conv_1500_to_mile),
+                    "1 Mile (if 1600m)": format_time(conv_1600_to_mile)
+                })
+                
+            elif target_event == "2 Mile":
+                pts_3000 = purdy_classic(3000.0, total_sec)
+                conv_3000_to_2mile = get_equivalent_time(3218.688, pts_3000)
+                
+                pts_3200 = purdy_classic(3200.0, total_sec)
+                conv_3200_to_2mile = get_equivalent_time(3218.688, pts_3200)
+                
+                results.append({
+                    "Name": row.get("Name", ""),
+                    "Input Time": final_time,
+                    "Original Notes": row.get("Notes", ""),
+                    "2 Mile (if 3000m)": format_time(conv_3000_to_2mile),
+                    "2 Mile (if 3200m)": format_time(conv_3200_to_2mile)
+                })
+        
+        if results:
+            res_df = pd.DataFrame(results)
+            st.success("Conversions complete!")
+            st.dataframe(res_df, use_container_width=True)
+            
+            file_label = target_event.replace(" ", "_").lower()
+            csv = res_df.to_csv(index=False).encode('utf-8')
+            st.download_button(label="Download Results as CSV", data=csv, file_name=f"bulk_seeds_{file_label}.csv", mime="text/csv")
+        else:
+            st.error("No valid times found to convert. Check your data format.")
