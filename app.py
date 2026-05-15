@@ -190,14 +190,11 @@ with tab4:
     
     target_event = st.radio("Target Seeding Event:", ["1 Mile", "2 Mile"], index=0, horizontal=True)
     
-    # NEW File Uploader!
     uploaded_file = st.file_uploader("Upload Athletic.net Entries CSV", type=["csv"])
     
     if uploaded_file is not None:
-        # Instantly reads your CSV into a neat table
         df = pd.read_csv(uploaded_file)
         
-        # Show a preview of the uploaded data so you know it worked
         st.write("Preview of uploaded data:")
         st.dataframe(df.head(3), use_container_width=True)
         
@@ -205,19 +202,25 @@ with tab4:
             results = []
             for index, row in df.iterrows():
                 
-                # Safely grab the Final Seed time
-                raw_time = str(row.get('Final Seed', ''))
+                raw_final = str(row.get('Final Seed', ''))
+                raw_auto = str(row.get('Auto Time', ''))
                 
-                # Find the valid time formatting (e.g. 4:35.02)
-                times = re.findall(r'\d+:\d{2}(?:\.\d+)?', raw_time)
-                if not times: 
+                times_final = re.findall(r'\d+:\d{2}(?:\.\d+)?', raw_final)
+                times_auto = re.findall(r'\d+:\d{2}(?:\.\d+)?', raw_auto)
+                
+                if not times_final: 
                     continue
                 
-                final_time = times[-1]
+                final_time = times_final[-1]
+                
+                # Check if Final Seed matches the Auto Time perfectly
+                is_auto_match = False
+                if times_auto and times_final[-1] == times_auto[-1]:
+                    is_auto_match = True
+                
                 parts = final_time.split(':')
                 total_sec = (int(parts[0]) * 60) + float(parts[1])
                 
-                # Combine User and Host comments so you don't miss anything
                 u_comment = str(row.get('User Comment', ''))
                 h_comment = str(row.get('Host Comment', ''))
                 combined_notes = f"{u_comment} {h_comment}".replace("nan", "").strip()
@@ -226,48 +229,55 @@ with tab4:
                 affiliation = str(row.get("Affiliation", ""))
                 
                 if target_event == "1 Mile":
-                    pts_1500 = purdy_classic(1500.0, total_sec)
-                    conv_1500_to_mile = get_equivalent_time(1609.344, pts_1500)
-                    
-                    pts_1600 = purdy_classic(1600.0, total_sec)
-                    conv_1600_to_mile = get_equivalent_time(1609.344, pts_1600)
-                    
+                    if is_auto_match:
+                        val_1500 = "-"
+                        val_1600 = "-"
+                    else:
+                        pts_1500 = purdy_classic(1500.0, total_sec)
+                        val_1500 = format_time(get_equivalent_time(1609.344, pts_1500))
+                        
+                        pts_1600 = purdy_classic(1600.0, total_sec)
+                        val_1600 = format_time(get_equivalent_time(1609.344, pts_1600))
+                        
                     results.append({
                         "Name": athlete_name,
                         "Team": affiliation,
-                        "Input Time (Final Seed)": final_time,
+                        "Input Time": final_time,
                         "Original Notes": combined_notes,
-                        "1 Mile (if 1500m)": format_time(conv_1500_to_mile),
-                        "1 Mile (if 1600m)": format_time(conv_1600_to_mile)
+                        "1 Mile (if 1500m)": val_1500,
+                        "1 Mile (if 1600m)": val_1600,
+                        "1 Mile (if 1 Mile)": final_time
                     })
                     
                 elif target_event == "2 Mile":
-                    pts_3000 = purdy_classic(3000.0, total_sec)
-                    conv_3000_to_2mile = get_equivalent_time(3218.688, pts_3000)
-                    
-                    pts_3200 = purdy_classic(3200.0, total_sec)
-                    conv_3200_to_2mile = get_equivalent_time(3218.688, pts_3200)
-                    
+                    if is_auto_match:
+                        val_3000 = "-"
+                        val_3200 = "-"
+                    else:
+                        pts_3000 = purdy_classic(3000.0, total_sec)
+                        val_3000 = format_time(get_equivalent_time(3218.688, pts_3000))
+                        
+                        pts_3200 = purdy_classic(3200.0, total_sec)
+                        val_3200 = format_time(get_equivalent_time(3218.688, pts_3200))
+                        
                     results.append({
                         "Name": athlete_name,
                         "Team": affiliation,
-                        "Input Time (Final Seed)": final_time,
+                        "Input Time": final_time,
                         "Original Notes": combined_notes,
-                        "2 Mile (if 3000m)": format_time(conv_3000_to_2mile),
-                        "2 Mile (if 3200m)": format_time(conv_3200_to_2mile)
+                        "2 Mile (if 3000m)": val_3000,
+                        "2 Mile (if 3200m)": val_3200,
+                        "2 Mile (if 2 Mile)": final_time
                     })
             
             if results:
                 res_df = pd.DataFrame(results)
                 st.success("Conversions complete!")
-                
-                # Display the beautifully structured cheat sheet
                 st.dataframe(res_df, use_container_width=True)
                 
                 file_label = target_event.replace(" ", "_").lower()
                 csv_data = res_df.to_csv(index=False).encode('utf-8')
                 
-                # Download button for the new table
                 st.download_button(label="Download Results as CSV", data=csv_data, file_name=f"bulk_seeds_{file_label}.csv", mime="text/csv")
             else:
                 st.error("No valid times found to convert. Check your data format.")
