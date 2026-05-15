@@ -88,14 +88,17 @@ tab1, tab2, tab3 = st.tabs(["Individual Conversions", "Relay Calculator", "Relay
 with tab1:
     st.subheader("Individual Performance Conversions")
     col1, col2, col3, col4 = st.columns(4)
-    raw_dist = col1.number_input("Distance", min_value=0.0, value=1500.0, step=10.0)
+    
+    # Changed default value to 1500 (instead of 1500.0) so Streamlit forces whole numbers
+    raw_dist = col1.number_input("Distance", min_value=0, value=1500, step=10)
     unit = col2.selectbox("Unit", ["Meters", "Miles", "Kilometers"])
     minutes = col3.number_input("Minutes", min_value=0, value=3, step=1)
     seconds = col4.number_input("Seconds", min_value=0.0, max_value=59.99, value=30.0, step=0.1)
 
-    if unit == "Miles": dist = raw_dist * 1609.344
-    elif unit == "Kilometers": dist = raw_dist * 1000.0
-    else: dist = raw_dist
+    # Convert the whole number back to a float for the math engine to process accurately
+    if unit == "Miles": dist = float(raw_dist) * 1609.344
+    elif unit == "Kilometers": dist = float(raw_dist) * 1000.0
+    else: dist = float(raw_dist)
 
     total_seconds = (minutes * 60) + seconds
 
@@ -104,14 +107,30 @@ with tab1:
         st.metric(label="Purdy Points", value=f"{score:.2f}")
 
         st.markdown("### Equivalent Times")
+        
+        # Reordered from shortest to longest distance, and added 3200m back in
         target_distances = [
-            ("200m", 200), ("1000m", 1000), ("300m", 300), ("1200m", 1200),
-            ("400m", 400), ("1500m", 1500), ("500m", 500), ("1600m", 1600),
-            ("600m", 600), ("1 Mile", 1609.344), ("800m", 800), ("3000m", 3000),
-            ("2 Mile", 3218.688), ("5k", 5000)
+            ("200m", 200),
+            ("300m", 300),
+            ("400m", 400),
+            ("500m", 500),
+            ("600m", 600),
+            ("800m", 800),
+            ("1000m", 1000),
+            ("1200m", 1200),
+            ("1500m", 1500),
+            ("1600m", 1600),
+            ("1 Mile", 1609.344),
+            ("3000m", 3000),
+            ("3200m", 3200),
+            ("2 Mile", 3218.688),
+            ("5k", 5000)
         ]
         
         c1, c2 = st.columns(2)
+        
+        # Streamlit easily handles the new odd number of items (15 distances) 
+        # using the exact same loop logic!
         for i in range(0, len(target_distances), 2):
             name1, dist1 = target_distances[i]
             c1.write(f"**{name1}:** {format_time(get_equivalent_time(dist1, score))}")
@@ -120,7 +139,6 @@ with tab1:
                 c2.write(f"**{name2}:** {format_time(get_equivalent_time(dist2, score))}")
     else:
         st.warning("Please enter a time greater than 0.")
-
 # ------------------------------------------
 # TAB 2: RELAY CALCULATOR (SIMPLE SUM)
 # ------------------------------------------
@@ -156,9 +174,27 @@ preset_map = {
     "DMR": ["1200m", "400m", "800m", "1600m"]
 }
 
+def update_preset():
+    """Streamlit callback to update session state when preset changes."""
+    selection = st.session_state.preset_dropdown
+    distances = preset_map.get(selection)
+    if distances:
+        for i in range(4):
+            # This directly overwrites Streamlit's memory for the 4 target dropdowns
+            st.session_state[f"c_out_{i}"] = distances[i]
+
+# Initialize default values in memory so they start cleanly at 400m
+for i in range(4):
+    if f"c_in_{i}" not in st.session_state:
+        st.session_state[f"c_in_{i}"] = "400m"
+    if f"c_out_{i}" not in st.session_state:
+        st.session_state[f"c_out_{i}"] = "400m"
+
 with tab3:
     st.subheader("Relay Calculator with Purdy Conversions")
-    preset_sel = st.selectbox("Event Preset:", list(preset_map.keys()))
+    
+    # We add an 'on_change' trigger so the app updates the dropdowns instantly
+    st.selectbox("Event Preset:", list(preset_map.keys()), key="preset_dropdown", on_change=update_preset)
     
     total_conv_sec = 0.0
     
@@ -170,14 +206,9 @@ with tab3:
         m = c2.number_input("Min", min_value=0, value=0, step=1, key=f"c_m_{i}")
         s = c3.number_input("Sec", min_value=0.0, max_value=59.99, value=0.0, step=0.1, key=f"c_s_{i}")
         
-        in_choice = c4.selectbox("Input Event", relay_choices, index=2, key=f"c_in_{i}")  # Default 400m
-        
-        # Handle presets dynamically
-        default_out_index = 2 # Default 400m
-        if preset_map[preset_sel]:
-            default_out_index = relay_choices.index(preset_map[preset_sel][i])
-            
-        out_choice = c5.selectbox("Convert To", relay_choices, index=default_out_index, key=f"c_out_{i}")
+        # Streamlit now handles the selected values natively via their session state 'key'
+        in_choice = c4.selectbox("Input Event", relay_choices, key=f"c_in_{i}")
+        out_choice = c5.selectbox("Convert To", relay_choices, key=f"c_out_{i}")
 
         leg_total_sec = (m * 60) + s
         if leg_total_sec > 0:
