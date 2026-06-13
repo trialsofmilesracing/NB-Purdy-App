@@ -343,6 +343,8 @@ with tab5:
             pts = purdy_classic(event_dist, total_sec)
             conv_sec = get_equivalent_time(target_dist, pts)
             rounded = round(conv_sec, 2)
-            c3.success(f"<div style='margin-top:10px;'><b>Converted {focus_event}:</b> {format_time(rounded)}</div>", unsafe_allow_html=True)
+            # Removed the HTML formatting from the success box to prevent the TypeError
+            c3.success(f"**Converted {focus_event}:** {format_time(rounded)}")
         else:
-            c3.caption(f"<div style='margin-top:45px;'><b>Converted {focus_event}: 0.00</b></div>", unsafe_allow_html=True)
+            # We use st.markdown here instead of caption so we can safely use the HTML spacing
+            c3.markdown(f"<div style='margin-top:35px; color:gray;'><b>Converted {focus_event}: 0.00</b></div>", unsafe_allow_html=True)
