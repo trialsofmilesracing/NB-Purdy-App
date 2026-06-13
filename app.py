@@ -297,7 +297,6 @@ with tab4:
 with tab5:
     st.subheader("Focused Single Event Seeding")
     st.markdown("Quickly convert common alternate distances directly into your target seeding event.")
-    st.markdown("*💡 **Pro-tip for speed:** Type the time (e.g., `4:35.2`) and hit the **Tab** key to instantly calculate and move to the next box without using your mouse!*")
     
     focus_event = st.selectbox("Select Target Event:", ["1 Mile", "2 Mile", "5000m", "400m"])
     
@@ -321,30 +320,16 @@ with tab5:
     st.markdown("---")
     
     for idx, (event_name, event_dist) in enumerate(input_events):
-        c1, c2, c3 = st.columns([1.5, 2, 3])
-        c1.markdown(f"<h5 style='margin-top:35px;'>If {event_name}:</h5>", unsafe_allow_html=True)
+        c1, c2, c3, c4 = st.columns([1.5, 1, 1, 2])
+        c1.markdown(f"<h5 style='margin-top:25px;'>If {event_name}:</h5>", unsafe_allow_html=True)
+        m = c2.number_input("Min", min_value=0, value=0, step=1, key=f"f_m_{idx}")
+        s = c3.number_input("Sec", min_value=0.0, max_value=59.99, value=0.0, step=0.1, key=f"f_s_{idx}")
         
-        # Single Text Box for rapid data entry
-        raw_time = c2.text_input("Enter Time (m:ss.ss)", key=f"f_t_{idx}")
-        
-        total_sec = 0
-        if raw_time:
-            clean_time = raw_time.strip()
-            if ':' in clean_time:
-                try:
-                    parts = clean_time.split(':')
-                    m = int(parts[0])
-                    s = float(parts[1])
-                    total_sec = (m * 60) + s
-                except ValueError:
-                    pass # Fails silently if they accidentally type a letter
-        
+        total_sec = (m * 60) + s
         if total_sec > 0:
             pts = purdy_classic(event_dist, total_sec)
             conv_sec = get_equivalent_time(target_dist, pts)
             rounded = round(conv_sec, 2)
-            # Removed the HTML formatting from the success box to prevent the TypeError
-            c3.success(f"**Converted {focus_event}:** {format_time(rounded)}")
+            c4.success(f"**Converted {focus_event}:** {format_time(rounded)}")
         else:
-            # We use st.markdown here instead of caption so we can safely use the HTML spacing
-            c3.markdown(f"<div style='margin-top:35px; color:gray;'><b>Converted {focus_event}: 0.00</b></div>", unsafe_allow_html=True)
+            c4.caption(f"<div style='margin-top:35px;'><b>Converted {focus_event}: 0.00</b></div>", unsafe_allow_html=True)
