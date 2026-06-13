@@ -82,7 +82,7 @@ def format_time(seconds):
 st.set_page_config(page_title="Purdy Points Calculator", layout="wide")
 st.title("🏃 Purdy Points & Race Calculator")
 
-tab1, tab2, tab3, tab4 = st.tabs(["Individual", "Relay (Simple)", "Relay (Conversions)", "Bulk Seeding Pipeline"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["Individual", "Relay (Simple)", "Relay (Conversions)", "Bulk Seeding Pipeline", "Focused Seeding"])
 
 # ------------------------------------------
 # TAB 1: INDIVIDUAL CALCULATOR
@@ -147,7 +147,17 @@ def update_preset():
     selection = st.session_state.preset_dropdown
     distances = preset_map.get(selection)
     if distances:
-        for i in range(4): st.session_state[f"c_out_{i}"] = distances[i]
+        for i in range(4): 
+            out_val = distances[i]
+            st.session_state[f"c_out_{i}"] = out_val
+            
+            # Smart default logic for input events
+            if selection == "4x1 mile":
+                st.session_state[f"c_in_{i}"] = "1600m"
+            elif out_val == "1200m":
+                st.session_state[f"c_in_{i}"] = "1600m"
+            else:
+                st.session_state[f"c_in_{i}"] = out_val
 
 for i in range(4):
     if f"c_in_{i}" not in st.session_state: st.session_state[f"c_in_{i}"] = "400m"
@@ -213,7 +223,6 @@ with tab4:
                 
                 final_time = times_final[-1]
                 
-                # Check if Final Seed matches the Auto Time perfectly
                 is_auto_match = False
                 if times_auto and times_final[-1] == times_auto[-1]:
                     is_auto_match = True
@@ -281,3 +290,46 @@ with tab4:
                 st.download_button(label="Download Results as CSV", data=csv_data, file_name=f"bulk_seeds_{file_label}.csv", mime="text/csv")
             else:
                 st.error("No valid times found to convert. Check your data format.")
+
+# ------------------------------------------
+# TAB 5: FOCUSED SEEDING
+# ------------------------------------------
+with tab5:
+    st.subheader("Focused Single Event Seeding")
+    st.markdown("Quickly convert common alternate distances directly into your target seeding event.")
+    
+    focus_event = st.selectbox("Select Target Event:", ["1 Mile", "2 Mile", "5000m", "400m"])
+    
+    focus_map = {
+        "1 Mile": [("1500m", 1500.0), ("1600m", 1600.0)],
+        "2 Mile": [("3000m", 3000.0), ("3200m", 3200.0)],
+        "5000m": [("3000m", 3000.0), ("3200m", 3200.0), ("2 Mile", 3218.688)],
+        "400m": [("300m", 300.0), ("500m", 500.0), ("600m", 600.0)]
+    }
+    
+    focus_target_dist = {
+        "1 Mile": 1609.344,
+        "2 Mile": 3218.688,
+        "5000m": 5000.0,
+        "400m": 400.0
+    }
+    
+    input_events = focus_map[focus_event]
+    target_dist = focus_target_dist[focus_event]
+    
+    st.markdown("---")
+    
+    for idx, (event_name, event_dist) in enumerate(input_events):
+        c1, c2, c3, c4 = st.columns([1.5, 1, 1, 2])
+        c1.markdown(f"<h5 style='margin-top:25px;'>If {event_name}:</h5>", unsafe_allow_html=True)
+        m = c2.number_input("Min", min_value=0, value=0, step=1, key=f"f_m_{idx}")
+        s = c3.number_input("Sec", min_value=0.0, max_value=59.99, value=0.0, step=0.1, key=f"f_s_{idx}")
+        
+        total_sec = (m * 60) + s
+        if total_sec > 0:
+            pts = purdy_classic(event_dist, total_sec)
+            conv_sec = get_equivalent_time(target_dist, pts)
+            rounded = round(conv_sec, 2)
+            c4.success(f"**Converted {focus_event}:** {format_time(rounded)}")
+        else:
+            c4.caption(f"<div style='margin-top:35px;'><b>Converted {focus_event}: 0.00</b></div>", unsafe_allow_html=True)
